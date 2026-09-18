@@ -2,120 +2,166 @@ package lru
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 )
 
-var (
-	ErrorItemNotFound = errors.New("item not found")
-)
+var ErrNotFound = errors.New("lru: key not found")
 
 type LRUCache interface {
 	Get(key int) (int, error)
+	Put(key, value int)
+	Peek(key int) (int, error)
+	Contains(key int) bool
 	Delete(key int) error
-	Insert(key, value int) error
 	Len() int
+	Cap() int
+	Keys() []int
+	Clear()
 }
 
-type Node struct {
-	prev, next *Node
+type node struct {
 	key, value int
+	prev, next *node
 }
 
 type Cache struct {
-	start, end *Node
-	storage    map[int]*Node
-	mu         sync.RWMutex
+	mu         sync.Mutex
 	cap        int
+	data       map[int]*node
+	head, tail *node
 }
 
+var _ LRUCache = (*Cache)(nil)
+
 func NewLRUCache(capacity int) *Cache {
+	if capacity <= 0 {
+		panic(fmt.Sprintf("lru: capacity must be positive, got %d", capacity))
+	}
+
+	head := &node{}
+	tail := &node{}
+	head.next = tail
+	tail.prev = head
+
 	return &Cache{
-		storage: make(map[int]*Node, capacity),
-		cap:     capacity,
+		cap:  capacity,
+		data: make(map[int]*node, capacity),
+		head: head,
+		tail: tail,
 	}
 }
 
 func (c *Cache) Get(key int) (int, error) {
-	c.mu.RLock()
-	ptr, ok := c.storage[key]
-	c.mu.RUnlock()
-	if !ok {
-		return 0, ErrorItemNotFound
-	}
-	if err := c.Delete(key); err != nil {
-		return 0, err
-	}
-	if err := c.Insert(key, ptr.value); err != nil {
-		return 0, err
-	}
-
-	return ptr.value, nil
-}
-
-func (c *Cache) Insert(key, value int) error {
-	newNode := &Node{
-		key:   key,
-		value: value,
-	}
 	c.mu.Lock()
-	if c.start == nil {
-		c.start = newNode
-	} else {
-		newNode.next = c.start
-		c.start.prev = newNode
-		c.start = newNode
+	defer c.mu.Unlock()
+
+	n, ok := c.data[key]
+	if !ok {
+		return 0, ErrNotFound
 	}
-	if c.end == nil {
-		c.end = newNode
-	} else {
-		if c.checkToDelete() {
-			if err := c.Delete(c.end.key); err != nil {
-				return err
-			}
-		}
-	}
-	c.storage[key] = newNode
-	c.mu.Unlock()
-	return nil
+	c.moveToFront(n)
+	return n.value, nil
 }
 
-func (c *Cache) checkToDelete() bool {
-	if c.Len() != c.cap {
-		return false
+func (c *Cache) Peek(key int) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	n, ok := c.data[key]
+	if !ok {
+		return 0, ErrNotFound
 	}
-	return true
+	return n.value, nil
+}
+
+func (c *Cache) Contains(key int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	_, ok := c.data[key]
+	return ok
+}
+
+func (c *Cache) Put(key, value int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if n, ok := c.data[key]; ok {
+		n.value = value
+		c.moveToFront(n)
+		return
+	}
+
+	n := &node{key: key, value: value}
+	c.data[key] = n
+	c.pushFront(n)
+
+	if len(c.data) > c.cap {
+		lru := c.tail.prev
+		c.unlink(lru)
+		delete(c.data, lru.key)
+	}
 }
 
 func (c *Cache) Delete(key int) error {
-	c.mu.RLock()
-	ptr, ok := c.storage[key]
-	c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	n, ok := c.data[key]
 	if !ok {
-		return ErrorItemNotFound
+		return ErrNotFound
 	}
-	afterPtr := ptr.next
-	prePtr := ptr.prev
-	if afterPtr == nil && prePtr == nil {
-		c.start = ptr
-		c.end = ptr
-	} else if afterPtr == nil {
-		prePtr.next = nil
-		c.end = prePtr
-	} else if prePtr == nil {
-		afterPtr.prev = nil
-		c.start = afterPtr
-	} else {
-		afterPtr.next = prePtr
-		prePtr.prev = afterPtr
-	}
-	delete(c.storage, key)
-
+	c.unlink(n)
+	delete(c.data, key)
 	return nil
-
 }
 
 func (c *Cache) Len() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.storage)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.data)
+}
+
+func (c *Cache) Cap() int {
+	return c.cap
+}
+
+func (c *Cache) Keys() []int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	keys := make([]int, 0, len(c.data))
+	for n := c.head.next; n != c.tail; n = n.next {
+		keys = append(keys, n.key)
+	}
+	return keys
+}
+
+func (c *Cache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.data = make(map[int]*node, c.cap)
+	c.head.next = c.tail
+	c.tail.prev = c.head
+}
+
+func (c *Cache) pushFront(n *node) {
+	n.prev = c.head
+	n.next = c.head.next
+	c.head.next.prev = n
+	c.head.next = n
+}
+
+func (c *Cache) unlink(n *node) {
+	n.prev.next = n.next
+	n.next.prev = n.prev
+	n.prev = nil
+	n.next = nil
+}
+
+func (c *Cache) moveToFront(n *node) {
+	c.unlink(n)
+	c.pushFront(n)
 }
