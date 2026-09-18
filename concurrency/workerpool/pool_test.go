@@ -59,8 +59,10 @@ func TestRun_EmptyJobs(t *testing.T) {
 	}
 }
 
-// 3. workers=0: не должно быть паники и зависания
+// 3. workers=0: не должно быть паники, зависания и утечки горутины producer'а
 func TestRun_ZeroWorkers(t *testing.T) {
+	before := runtime.NumGoroutine()
+
 	workers := 0
 	workingPool := NewPool(workers, func(ctx context.Context, n int) (int, error) {
 		return n * n, nil
@@ -74,6 +76,11 @@ func TestRun_ZeroWorkers(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("hung with zero workers")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if after := runtime.NumGoroutine(); after > before {
+		t.Fatalf("goroutine leak with zero workers: before=%d after=%d", before, after)
 	}
 }
 

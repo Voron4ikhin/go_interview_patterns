@@ -24,29 +24,34 @@ func NewPool(workers int, fn func(ctx context.Context, n int) (int, error)) *Poo
 }
 
 func (p *Pool) Run(ctx context.Context, jobs []int) <-chan Result {
-	producer := make(chan int)
-	consumer := make(chan Result)
+	resultsCh := make(chan Result)
 
+	if p.workers <= 0 {
+		close(resultsCh)
+		return resultsCh
+	}
+
+	jobsCh := make(chan int)
 	go func() {
-		defer close(producer)
-		for i := 0; i < len(jobs); i++ {
+		defer close(jobsCh)
+		for _, job := range jobs {
 			select {
 			case <-ctx.Done():
 				return
-			case producer <- jobs[i]:
+			case jobsCh <- job:
 			}
 		}
 	}()
 
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(p.workers)
 	for i := 0; i < p.workers; i++ {
 		go func() {
 			defer wg.Done()
-			for job := range producer {
+			for job := range jobsCh {
 				val, err := p.fn(ctx, job)
 				select {
-				case consumer <- Result{Job: job, Value: val, Err: err}:
+				case resultsCh <- Result{Job: job, Value: val, Err: err}:
 				case <-ctx.Done():
 					return
 				}
@@ -56,8 +61,8 @@ func (p *Pool) Run(ctx context.Context, jobs []int) <-chan Result {
 
 	go func() {
 		wg.Wait()
-		defer close(consumer)
+		close(resultsCh)
 	}()
 
-	return consumer
+	return resultsCh
 }
