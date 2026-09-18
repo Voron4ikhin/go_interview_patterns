@@ -1,35 +1,55 @@
 package pipeline
 
 import (
+	"context"
 	"math/rand"
 	"time"
 )
 
-func simpleGenerator(n int) <-chan int {
+func Generate(ctx context.Context, n int) <-chan int {
 	out := make(chan int)
 
 	go func() {
 		defer close(out)
 		for i := 0; i < n; i++ {
-			out <- rand.Intn(100) + 1
-			time.Sleep(time.Millisecond * 100)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			select {
+			case out <- rand.Intn(100) + 1:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 
 	return out
 }
 
-func multiplier(val <-chan int, x int) <-chan int {
+func Multiply(ctx context.Context, in <-chan int, x int) <-chan int {
 	out := make(chan int)
 
 	go func() {
 		defer close(out)
-		for v := range val {
-			out <- x * v
+		for {
+			select {
+			case v, ok := <-in:
+				if !ok {
+					return
+				}
+				select {
+				case out <- x * v:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 
 	return out
 }
-
-// Запуск multiplier(simpleGenerator(4), 2)
