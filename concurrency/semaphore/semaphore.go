@@ -3,11 +3,15 @@ package semaphore
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 type Semaphore chan struct{}
 
 func NewSemaphore(n int) Semaphore {
+	if n <= 0 {
+		panic(fmt.Sprintf("semaphore: n must be positive, got %d", n))
+	}
 	return make(Semaphore, n)
 }
 
