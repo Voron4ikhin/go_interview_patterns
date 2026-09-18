@@ -2,6 +2,7 @@ package ratelimiter
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -10,6 +11,13 @@ type TokenBucketLimiter struct {
 }
 
 func NewTokenBucketLimiter(ctx context.Context, limit int, period time.Duration) *TokenBucketLimiter {
+	if limit <= 0 {
+		panic(fmt.Sprintf("ratelimiter: limit must be positive, got %d", limit))
+	}
+	if period <= 0 {
+		panic(fmt.Sprintf("ratelimiter: period must be positive, got %s", period))
+	}
+
 	limiter := &TokenBucketLimiter{
 		tokenBucketCh: make(chan struct{}, limit),
 	}

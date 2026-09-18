@@ -2,6 +2,7 @@ package ratelimiter
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -146,5 +147,46 @@ func TestTokenBucket_ContextCancel(t *testing.T) {
 	time.Sleep(period * 5)
 	if l.Allow() {
 		t.Fatal("expected no replenishment after context cancel")
+	}
+}
+
+// 7. Невалидные параметры конструктора паникуют, а не роняют программу делением на ноль/тикером с отрицательным интервалом
+func TestNewTokenBucketLimiter_InvalidParams(t *testing.T) {
+	cases := []struct {
+		name   string
+		limit  int
+		period time.Duration
+	}{
+		{"zero limit", 0, time.Second},
+		{"negative limit", -1, time.Second},
+		{"zero period", 5, 0},
+		{"negative period", 5, -time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected panic for invalid constructor params")
+				}
+			}()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_ = NewTokenBucketLimiter(ctx, tc.limit, tc.period)
+		})
+	}
+}
+
+// 8. Отмена контекста останавливает горутину пополнения, а не просто перестаёт выдавать токены
+func TestTokenBucket_StopsGoroutineOnCancel(t *testing.T) {
+	before := runtime.NumGoroutine()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = NewTokenBucketLimiter(ctx, 3, 30*time.Millisecond)
+	cancel()
+
+	time.Sleep(100 * time.Millisecond)
+	if after := runtime.NumGoroutine(); after > before {
+		t.Fatalf("goroutine leak after cancel: before=%d after=%d", before, after)
 	}
 }
