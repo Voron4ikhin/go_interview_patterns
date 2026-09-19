@@ -9,13 +9,23 @@ import (
 	"time"
 )
 
+type Result struct {
+	Value int
+	Job   int
+	Err   error
+}
+
 // 1. Happy path: все задачи обработаны
 func TestRun_ProcessesAllJobs(t *testing.T) {
 	jobs := []int{1, 2, 3, 4, 5}
 	got := make([]int, 0, len(jobs))
 	workers := 3
-	workingPool := NewPool(workers, func(ctx context.Context, n int) (int, error) {
-		return n * n, nil
+	workingPool := NewPool[int, Result](workers, func(ctx context.Context, n int) Result {
+		return Result{
+			Value: n * n,
+			Job:   n,
+			Err:   nil,
+		}
 	})
 
 	for r := range workingPool.Run(context.Background(), jobs) {
@@ -44,8 +54,12 @@ func TestRun_ProcessesAllJobs(t *testing.T) {
 // 2. Пустой список задач: канал результатов закрывается сразу
 func TestRun_EmptyJobs(t *testing.T) {
 	workers := 3
-	workingPool := NewPool(workers, func(ctx context.Context, n int) (int, error) {
-		return n * n, nil
+	workingPool := NewPool[int, Result](workers, func(ctx context.Context, n int) Result {
+		return Result{
+			Value: n * n,
+			Job:   n,
+			Err:   nil,
+		}
 	})
 	ch := workingPool.Run(context.Background(), nil)
 
@@ -64,8 +78,12 @@ func TestRun_ZeroWorkers(t *testing.T) {
 	before := runtime.NumGoroutine()
 
 	workers := 0
-	workingPool := NewPool(workers, func(ctx context.Context, n int) (int, error) {
-		return n * n, nil
+	workingPool := NewPool[int, Result](workers, func(ctx context.Context, n int) Result {
+		return Result{
+			Value: n * n,
+			Job:   n,
+			Err:   nil,
+		}
 	})
 	ch := workingPool.Run(context.Background(), []int{1, 2, 3})
 
@@ -99,7 +117,7 @@ func TestRun_LimitsConcurrency(t *testing.T) {
 	var inFlight atomic.Int32
 	var maxSeen atomic.Int32
 
-	workingPool := NewPool(workers, func(ctx context.Context, n int) (int, error) {
+	workingPool := NewPool[int, Result](workers, func(ctx context.Context, n int) Result {
 		cur := inFlight.Add(1)
 		for {
 			prev := maxSeen.Load()
@@ -109,7 +127,11 @@ func TestRun_LimitsConcurrency(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 		inFlight.Add(-1)
-		return n, nil
+		return Result{
+			Value: n,
+			Job:   n,
+			Err:   nil,
+		}
 	})
 	for range workingPool.Run(context.Background(), jobs) {
 	}
@@ -130,12 +152,20 @@ func TestRun_ContextCancel(t *testing.T) {
 
 	done := make(chan struct{})
 	workers := 4
-	workingPool := NewPool(workers, func(ctx context.Context, n int) (int, error) {
+	workingPool := NewPool[int, Result](workers, func(ctx context.Context, n int) Result {
 		select {
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return Result{
+				Value: 0,
+				Job:   n,
+				Err:   ctx.Err(),
+			}
 		case <-time.After(10 * time.Millisecond):
-			return n, nil
+			return Result{
+				Value: n,
+				Job:   n,
+				Err:   nil,
+			}
 		}
 	})
 	go func() {
@@ -161,11 +191,19 @@ func TestRun_PropagatesErrors(t *testing.T) {
 
 	var errs int
 	workers := 2
-	workingPool := NewPool(workers, func(_ context.Context, n int) (int, error) {
+	workingPool := NewPool[int, Result](workers, func(_ context.Context, n int) Result {
 		if n == 2 {
-			return 0, boom
+			return Result{
+				Value: 0,
+				Job:   n,
+				Err:   boom,
+			}
 		}
-		return n, nil
+		return Result{
+			Value: n,
+			Job:   n,
+			Err:   nil,
+		}
 	})
 	for r := range workingPool.Run(context.Background(), jobs) {
 		if r.Err != nil {
@@ -189,8 +227,12 @@ func TestRun_NoGoroutineLeak(t *testing.T) {
 		jobs[i] = i
 	}
 	workers := 8
-	workingPool := NewPool(workers, func(_ context.Context, n int) (int, error) {
-		return n, nil
+	workingPool := NewPool[int, Result](workers, func(_ context.Context, n int) Result {
+		return Result{
+			Value: n,
+			Job:   n,
+			Err:   nil,
+		}
 	})
 
 	for range workingPool.Run(context.Background(), jobs) {

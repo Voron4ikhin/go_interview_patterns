@@ -5,33 +5,27 @@ import (
 	"sync"
 )
 
-type Pool struct {
+type Pool[T, R any] struct {
 	workers int
-	fn      func(ctx context.Context, n int) (int, error)
+	fn      func(ctx context.Context, n T) R
 }
 
-type Result struct {
-	Job   int
-	Value int
-	Err   error
-}
-
-func NewPool(workers int, fn func(ctx context.Context, n int) (int, error)) *Pool {
-	return &Pool{
+func NewPool[T, R any](workers int, fn func(ctx context.Context, n T) R) *Pool[T, R] {
+	return &Pool[T, R]{
 		workers: workers,
 		fn:      fn,
 	}
 }
 
-func (p *Pool) Run(ctx context.Context, jobs []int) <-chan Result {
-	resultsCh := make(chan Result)
+func (p *Pool[T, R]) Run(ctx context.Context, jobs []T) <-chan R {
+	resultsCh := make(chan R)
 
 	if p.workers <= 0 {
 		close(resultsCh)
 		return resultsCh
 	}
 
-	jobsCh := make(chan int)
+	jobsCh := make(chan T)
 	go func() {
 		defer close(jobsCh)
 		for _, job := range jobs {
@@ -48,12 +42,19 @@ func (p *Pool) Run(ctx context.Context, jobs []int) <-chan Result {
 	for i := 0; i < p.workers; i++ {
 		go func() {
 			defer wg.Done()
-			for job := range jobsCh {
-				val, err := p.fn(ctx, job)
+			for {
 				select {
-				case resultsCh <- Result{Job: job, Value: val, Err: err}:
 				case <-ctx.Done():
 					return
+				case job, ok := <-jobsCh:
+					if !ok {
+						return
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case resultsCh <- p.fn(ctx, job):
+					}
 				}
 			}
 		}()
