@@ -1,40 +1,27 @@
 package lru
 
 import (
-	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/Voron4ikhin/go_interview_patterns/data/cache"
 )
-
-var ErrNotFound = errors.New("lru: key not found")
-
-type LRUCache interface {
-	Get(key int) (int, error)
-	Put(key, value int)
-	Peek(key int) (int, error)
-	Contains(key int) bool
-	Delete(key int) error
-	Len() int
-	Cap() int
-	Keys() []int
-	Clear()
-}
 
 type node struct {
 	key, value int
 	prev, next *node
 }
 
-type Cache struct {
+type LRUCache struct {
 	mu         sync.Mutex
 	cap        int
 	data       map[int]*node
 	head, tail *node
 }
 
-var _ LRUCache = (*Cache)(nil)
+var _ cache.Cache = (*LRUCache)(nil)
 
-func NewLRUCache(capacity int) *Cache {
+func NewLRUCache(capacity int) *LRUCache {
 	if capacity <= 0 {
 		panic(fmt.Sprintf("lru: capacity must be positive, got %d", capacity))
 	}
@@ -44,7 +31,7 @@ func NewLRUCache(capacity int) *Cache {
 	head.next = tail
 	tail.prev = head
 
-	return &Cache{
+	return &LRUCache{
 		cap:  capacity,
 		data: make(map[int]*node, capacity),
 		head: head,
@@ -52,30 +39,30 @@ func NewLRUCache(capacity int) *Cache {
 	}
 }
 
-func (c *Cache) Get(key int) (int, error) {
+func (c *LRUCache) Get(key int) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	n, ok := c.data[key]
 	if !ok {
-		return 0, ErrNotFound
+		return 0, cache.ErrNotFound
 	}
 	c.moveToFront(n)
 	return n.value, nil
 }
 
-func (c *Cache) Peek(key int) (int, error) {
+func (c *LRUCache) Peek(key int) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	n, ok := c.data[key]
 	if !ok {
-		return 0, ErrNotFound
+		return 0, cache.ErrNotFound
 	}
 	return n.value, nil
 }
 
-func (c *Cache) Contains(key int) bool {
+func (c *LRUCache) Contains(key int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -83,7 +70,7 @@ func (c *Cache) Contains(key int) bool {
 	return ok
 }
 
-func (c *Cache) Put(key, value int) {
+func (c *LRUCache) Put(key, value int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -104,30 +91,30 @@ func (c *Cache) Put(key, value int) {
 	}
 }
 
-func (c *Cache) Delete(key int) error {
+func (c *LRUCache) Delete(key int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	n, ok := c.data[key]
 	if !ok {
-		return ErrNotFound
+		return cache.ErrNotFound
 	}
 	c.unlink(n)
 	delete(c.data, key)
 	return nil
 }
 
-func (c *Cache) Len() int {
+func (c *LRUCache) Len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.data)
 }
 
-func (c *Cache) Cap() int {
+func (c *LRUCache) Cap() int {
 	return c.cap
 }
 
-func (c *Cache) Keys() []int {
+func (c *LRUCache) Keys() []int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -138,7 +125,7 @@ func (c *Cache) Keys() []int {
 	return keys
 }
 
-func (c *Cache) Clear() {
+func (c *LRUCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -147,21 +134,21 @@ func (c *Cache) Clear() {
 	c.tail.prev = c.head
 }
 
-func (c *Cache) pushFront(n *node) {
+func (c *LRUCache) pushFront(n *node) {
 	n.prev = c.head
 	n.next = c.head.next
 	c.head.next.prev = n
 	c.head.next = n
 }
 
-func (c *Cache) unlink(n *node) {
+func (c *LRUCache) unlink(n *node) {
 	n.prev.next = n.next
 	n.next.prev = n.prev
 	n.prev = nil
 	n.next = nil
 }
 
-func (c *Cache) moveToFront(n *node) {
+func (c *LRUCache) moveToFront(n *node) {
 	c.unlink(n)
 	c.pushFront(n)
 }
