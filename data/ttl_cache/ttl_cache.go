@@ -12,29 +12,34 @@ type Item struct {
 	Expiration time.Time
 }
 
+func (it Item) expired(now time.Time) bool {
+	return now.After(it.Expiration)
+}
+
 type TTLCache struct {
-	mu     sync.RWMutex
-	data   map[int]Item
-	ttl    time.Duration
-	stopCh chan struct{}
+	mu       sync.RWMutex
+	data     map[int]Item
+	ttl      time.Duration
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 var _ cache.Cache = (*TTLCache)(nil)
 
-func NewTTLCache(cleanupInterval time.Duration) *TTLCache {
+func NewTTLCache(ttl, cleanupInterval time.Duration) *TTLCache {
 	ttlCache := &TTLCache{
-		ttl:    cleanupInterval,
+		ttl:    ttl,
 		data:   make(map[int]Item),
 		stopCh: make(chan struct{}),
 	}
 
-	go ttlCache.startCleanup()
+	go ttlCache.startCleanup(cleanupInterval)
 
 	return ttlCache
 }
 
-func (c *TTLCache) startCleanup() {
-	ticker := time.NewTicker(c.ttl)
+func (c *TTLCache) startCleanup(cleanupInterval time.Duration) {
+	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -42,7 +47,7 @@ func (c *TTLCache) startCleanup() {
 			c.mu.Lock()
 			now := time.Now()
 			for k, v := range c.data {
-				if now.After(v.Expiration) {
+				if v.expired(now) {
 					delete(c.data, k)
 				}
 			}
@@ -54,7 +59,9 @@ func (c *TTLCache) startCleanup() {
 }
 
 func (c *TTLCache) Close() {
-	close(c.stopCh)
+	c.stopOnce.Do(func() {
+		close(c.stopCh)
+	})
 }
 
 func (c *TTLCache) Get(key int) (int, error) {
@@ -62,7 +69,7 @@ func (c *TTLCache) Get(key int) (int, error) {
 	defer c.mu.Unlock()
 
 	val, ok := c.data[key]
-	if !ok || time.Now().After(val.Expiration) {
+	if !ok || val.expired(time.Now()) {
 		return 0, cache.ErrNotFound
 	}
 
@@ -87,19 +94,19 @@ func (c *TTLCache) Peek(key int) (int, error) {
 	defer c.mu.RUnlock()
 
 	val, ok := c.data[key]
-	if !ok || time.Now().After(val.Expiration) {
+	if !ok || val.expired(time.Now()) {
 		return 0, cache.ErrNotFound
 	}
 
 	return val.Value, nil
-
 }
+
 func (c *TTLCache) Contains(key int) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	val, ok := c.data[key]
-	if !ok || time.Now().After(val.Expiration) {
+	if !ok || val.expired(time.Now()) {
 		return false
 	}
 
@@ -121,17 +128,27 @@ func (c *TTLCache) Delete(key int) error {
 func (c *TTLCache) Len() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return len(c.data)
+
+	now := time.Now()
+	count := 0
+	for _, v := range c.data {
+		if !v.expired(now) {
+			count++
+		}
+	}
+	return count
 }
 
 func (c *TTLCache) Keys() []int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	length := len(c.data)
-	keys := make([]int, 0, length)
 
-	for k, _ := range c.data {
-		keys = append(keys, k)
+	now := time.Now()
+	keys := make([]int, 0, len(c.data))
+	for k, v := range c.data {
+		if !v.expired(now) {
+			keys = append(keys, k)
+		}
 	}
 
 	return keys

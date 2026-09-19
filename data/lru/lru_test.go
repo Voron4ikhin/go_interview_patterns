@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+
+	"github.com/Voron4ikhin/go_interview_patterns/data/cache"
 )
 
 // 1. Put сохраняет значение, Get его возвращает
@@ -24,7 +26,7 @@ func TestCache_PutAndGet(t *testing.T) {
 // 2. Get отсутствующего ключа возвращает ErrNotFound
 func TestCache_GetMissing(t *testing.T) {
 	c := NewLRUCache(2)
-	if _, err := c.Get(1); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(1); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }
@@ -36,7 +38,7 @@ func TestCache_EvictsLeastRecentlyUsed(t *testing.T) {
 	c.Put(2, 20)
 	c.Put(3, 30)
 
-	if _, err := c.Get(1); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(1); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("key 1 should have been evicted, got err=%v", err)
 	}
 	if v, err := c.Get(2); err != nil || v != 20 {
@@ -55,7 +57,7 @@ func TestCache_GetRefreshesRecency(t *testing.T) {
 	c.Get(1)
 	c.Put(3, 30)
 
-	if _, err := c.Get(2); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(2); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("key 2 should have been evicted, got err=%v", err)
 	}
 	if v, err := c.Get(1); err != nil || v != 10 {
@@ -77,7 +79,7 @@ func TestCache_PutExistingKeyUpdatesValueAndRecency(t *testing.T) {
 	if v, err := c.Get(1); err != nil || v != 999 {
 		t.Fatalf("key 1 should be updated, got v=%d err=%v", v, err)
 	}
-	if _, err := c.Get(2); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(2); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("key 2 should have been evicted, got err=%v", err)
 	}
 }
@@ -90,10 +92,10 @@ func TestCache_Delete(t *testing.T) {
 	if err := c.Delete(1); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := c.Get(1); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(1); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("key 1 should be gone, got err=%v", err)
 	}
-	if err := c.Delete(1); !errors.Is(err, ErrNotFound) {
+	if err := c.Delete(1); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("deleting missing key should return ErrNotFound, got %v", err)
 	}
 }
@@ -110,7 +112,7 @@ func TestCache_Peek(t *testing.T) {
 
 	c.Put(3, 30)
 
-	if _, err := c.Get(1); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(1); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("key 1 should have been evicted despite Peek, got err=%v", err)
 	}
 }
@@ -180,7 +182,7 @@ func TestCache_Clear(t *testing.T) {
 	if got := c.Keys(); len(got) != 0 {
 		t.Fatalf("want no keys after Clear, got %v", got)
 	}
-	if _, err := c.Get(1); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(1); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("want ErrNotFound after Clear, got %v", err)
 	}
 
@@ -196,7 +198,7 @@ func TestCache_CapacityOne(t *testing.T) {
 	c.Put(1, 10)
 	c.Put(2, 20)
 
-	if _, err := c.Get(1); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(1); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("key 1 should have been evicted, got err=%v", err)
 	}
 	if v, err := c.Get(2); err != nil || v != 20 {
